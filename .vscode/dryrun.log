@@ -1,6 +1,0 @@
-make --dry-run --always-make --keep-going --print-directory
-make: Entering directory `/Users/albert32384/tech.rab.evm'
-make: Leaving directory `/Users/albert32384/tech.rab.evm'
- 
-make: *** No targets specified and no makefile found.  Stop.
-
