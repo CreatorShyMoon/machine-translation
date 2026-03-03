@@ -309,7 +309,7 @@ int main(void) {
 		}
 
 		gmp_randclear(state); 
-		printf("Готово. Результаты в папках zadanie/ и proverka/.\n");
+		printf("Готово. Результаты в папках zadanie/ и proverka/\n");
 
 		return 0;
 }
