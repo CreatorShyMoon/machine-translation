@@ -10,7 +10,7 @@ make all --print-data-base --no-builtin-variables --no-builtin-rules --question
 make: *** No rule to make target `all'.  Stop.
 
 
-# Make data base, printed on Mon Mar  2 19:37:29 2026
+# Make data base, printed on Tue Mar  3 12:30:25 2026
 
 # Variables
 
@@ -123,6 +123,9 @@ XPC_SERVICE_NAME = application.com.microsoft.VSCode.82269235.82269241
 HOMEBREW_PREFIX = /opt/homebrew
 # automatic
 +D = $(patsubst %/,%,$(dir $+))
+ 
+# environment
+VSCODE_L10N_BUNDLE_LOCATION = file:///Users/albert32384/.vscode/extensions/ms-ceintl.vscode-language-pack-ru-1.108.2026021109/translations/extensions/vscode.json-language-features.i18n.json
 # automatic
 +F = $(notdir $+)
 # environment
@@ -136,7 +139,6 @@ MAKEFILES :=
 # automatic
 <F = $(notdir $<)
 # environment
- 
 LC_ALL = C
 # automatic
 ^F = $(notdir $^)
@@ -147,9 +149,9 @@ MAKELEVEL := 0
 # environment
 LANG = C
 # environment
-VSCODE_PID = 60127
+VSCODE_PID = 74402
 # variable set hash-table stats:
-# Load=66/1024=6%, Rehash=0, Collisions=1/86=1%
+# Load=67/1024=7%, Rehash=0, Collisions=1/87=1%
 
 # Pattern-specific Variable Values
 
@@ -157,9 +159,9 @@ VSCODE_PID = 60127
 
 # Directories
 
-# . (device 16777230, inode 83276577): 5 files, no impossibilities.
+# . (device 16777230, inode 83276577): 9 files, no impossibilities.
 
-# 5 files, no impossibilities in 1 directories.
+# 9 files, no impossibilities in 1 directories.
 
 # Implicit Rules
 
@@ -200,6 +202,7 @@ makefile:
 #  File has been updated.
 #  Failed to be updated.
 # variable set hash-table stats:
+ 
 # Load=0/32=0%, Rehash=0, Collisions=0/0=0%
 
 # Not a target:
@@ -231,6 +234,6 @@ GNUmakefile:
 # strcache size: total = 0 / max = 0 / min = 4096 / avg = 0
 # strcache free: total = 0 / max = 0 / min = 4096 / avg = 0
 
-# Finished Make data base on Mon Mar  2 19:37:29 2026
+# Finished Make data base on Tue Mar  3 12:30:25 2026
 
  
