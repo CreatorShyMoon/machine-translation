@@ -16,7 +16,7 @@
 
 N – количество вариантов  
 K – количество чисел в варианте  
-Разрядность (32 или 64)  
+Разрядность (32,64,128)  
 a – нижняя граница диапазона  
 b – верхняя граница диапазона  
 P – количество знаков после запятой  
@@ -43,7 +43,11 @@ P – количество знаков после запятой
 
 
 ```bash
-clang src/main.c -o generator -lm
+# является кросс-платформенной в пределах UNIX-подобных систем, если у них установлены библиотеки GMP и MPFR в стандартных путях.
+gcc 1.1lab.c -o program -lmpfr -lgmp -lm
 
-Запуск
-./generator
+# я запускал на MacOS + homebrew не скачивая библиотеки
+gcc 1.1lab.c -o program -I/opt/homebrew/include -L/opt/homebrew/lib -Wl,-rpath,/opt/homebrew/lib -lmpfr -lgmp -lm
+
+# Запуск
+./program
