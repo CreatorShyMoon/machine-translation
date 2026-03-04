@@ -8,7 +8,7 @@
 
 
 typedef enum {
-		type_fl,  // float (32 бита)
+		type_fl,  // float (32 бита))
 		type_d,   // double (64 бита)
 		type_ld   // long double (обычно 80 или 128 бит)
 } Type;
