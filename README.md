@@ -52,3 +52,4 @@ gcc 1.1lab.c -o program -I/opt/homebrew/include -L/opt/homebrew/lib -Wl,-rpath,/
 # Запуск
 ./program
 # 123242
+# 123242
