@@ -8,7 +8,7 @@
 
 
 typedef enum {
-		type_fl,  // float (32 бита))
+		type_fl,  // float (32 бита)
 		type_d,   // double (64 бита)
 		type_ld   // long double (обычно 80 или 128 бит)
 } Type;
@@ -87,8 +87,8 @@ void generate_random_string(double a, double b, int P, char *buffer, size_t buf_
 		r = round(r * scale) / scale; // округляем до P знаков
 		snprintf(buffer, buf_size, "%.*f", P, r); // сохраняем в строку
 }
-// Функция mpfr_to_ieee128_bits(число MPFR, строка bits)
-// Переводит число mpfr_t в строковое представление 128-битного IEEE (binary128)
+// Функция (число MPFR, строка bits)
+// Переводит число mpfr_t в строковое представление 128-битного (binary128)
 void mpfr_to_ieee128_bits(mpfr_t x, char *bits) {
 		if (mpfr_zero_p(x)) {                 // Функция mpfr_zero_p(x) проверяет, равно ли число нулю
 				memset(bits, '0', 128);           // Если ноль, все биты равны 0
@@ -101,12 +101,19 @@ void mpfr_to_ieee128_bits(mpfr_t x, char *bits) {
 
 		mpfr_exp_t exp;                        // Переменная для хранения порядка
 		mpz_t mantissa;                        // Целая часть мантиссы
-		mpz_init(mantissa);                    
+		mpz_init(mantissa);                   // Функция mpz_init(переменная)  
 
-		mpfr_get_z_2exp(mantissa, x);          // Функция mpfr_get_z_2exp(mantissa, x) извлекает мантиссу и порядок: x = mantissa * 2^exp
+		// Функция mpfr_get_z_2exp(мантисса, x)
+		// Извлекает мантиссу и порядок числа x в виде: x = мантисса * 2^exp
+		// Возвращает порядок, мантисса записывается в mantissa
+		exp = mpfr_get_z_2exp(mantissa, x);
 
-		size_t mant_bits = mpz_sizeinbase(mantissa, 2); // mpz_sizeinbase — количество бит в мантиссе
-		int biased_exp = exp - (int)mant_bits + 1 + 16383; // смещённый порядок (смещение 16383 для binary128)
+		// Функция mpz_sizeinbase(число, основание)
+		// Возвращает количество цифр числа в указанной системе счисления
+		// При основании 2 — это количество бит
+		size_t mant_bits = mpz_sizeinbase(mantissa, 2);
+
+		int biased_exp = exp - (int)mant_bits + 1 + 16383; // смещённый порядок
 
 		// Записываем 15 бит порядка
 		for (int i = 0; i < 15; i++) {
@@ -114,18 +121,33 @@ void mpfr_to_ieee128_bits(mpfr_t x, char *bits) {
 		}
 
 		mpz_t mant_frac, mask;
-		mpz_init(mant_frac);
-		mpz_init(mask);
+		mpz_init(mant_frac);                  // Функция mpz_init(переменная) — инициализация mpz_t
+		mpz_init(mask);                       // Функция mpz_init(переменная) — инициализация mpz_t
 
+		// Функция mpz_set_ui(переменная, значение)
+		// Присваивает беззнаковое целое значение
 		mpz_set_ui(mask, 1);
-		mpz_mul_2exp(mask, mask, 112); // маска для 112 бит мантиссы
-		mpz_sub_ui(mask, mask, 1);
+
+		// Функция mpz_mul_2exp(результат, число, k)
+		// Вычисляет: результат = число · 2^k (сдвиг влево на k бит)
+		mpz_mul_2exp(mask, mask, 112);
+
+		// Функция mpz_sub_ui(результат, число, значение)
+		// Вычисляет: результат = число − значение
+		mpz_sub_ui(mask, mask, 1); // маска для 112 бит мантиссы
 
 		if (mant_bits > 113) {
+				// Функция mpz_tdiv_q_2exp(результат, число, k)
+				// Делит число на 2^k с усечением (сдвиг вправо)
 				mpz_tdiv_q_2exp(mant_frac, mantissa, mant_bits - 113); // усечение лишних бит
 		} else {
+				// Функция mpz_mul_2exp(результат, число, k)
+				// Сдвиг влево (умножение на 2^k)
 				mpz_mul_2exp(mant_frac, mantissa, 112 - (mant_bits - 1)); // выравнивание в младшие 112 бит
 		}
+
+		// Функция mpz_and(результат, число1, число2)
+		// Побитовое И: результат = число1 AND число2
 		mpz_and(mant_frac, mant_frac, mask); // применяем маску
 
 		char *mant_str = mpz_get_str(NULL, 2, mant_frac); // преобразуем мантиссу в строку битов
@@ -168,8 +190,8 @@ int main(void) {
 		mpfr_set_default_rounding_mode(MPFR_RNDN); // MPFR: округление к ближайшему
 
 		gmp_randstate_t state;
-		gmp_randinit_default(state); // GMP: инициализация генератора
-		gmp_randseed_ui(state, time(NULL)); // GMP: засеваем генератор временем
+		gmp_randinit_default(state); // GMP инициализация генератора
+		gmp_randseed_ui(state, time(NULL)); // GMP засеваем генератор временем
 
 		// Цикл по вариантам
 		for (int v = 1; v <= N; v++) {
@@ -264,6 +286,7 @@ int main(void) {
 								// Вывод типа и значения
 								poisknumber_auto(&temp, sizeof(temp), "64-bit");
 						}
+						//так на самом деле можно было сделать и 64 без mpfr но мне удобнее с ним без него я не мог ошибку поймать 
 						// 128
 						else if (bits == 128) {
 								mpfr_t original_mpfr, rounded_mpfr, diff;
