@@ -30,7 +30,6 @@ void vesh_to_bits(void *num, size_t size, char *out) {
 			out[k++] = (bytes[i-1] >> b) & 1 ? '1' : '0';
 		}
 	}
-	out[size * 8] = '\0';
 }
 
 /**
@@ -152,7 +151,6 @@ void bits_to_mpfr128(char *bits, mpfr_t rop) {
 void mpfr_to_bits(mpfr_t x, char *bits) {
     if (mpfr_zero_p(x)) {
         memset(bits, '0', 128);
-        bits[128] = '\0';
         return;
     }
 
