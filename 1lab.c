@@ -7,332 +7,425 @@
 #include <mpfr.h>
 
 
-typedef enum {
-		type_fl,  // float (32 бита)
-		type_d,   // double (64 бита)
-		type_ld   // long double (обычно 80 или 128 бит)
-} Type;
+void vesh_to_bits(void *num, size_t size, char *out);
+void format_bits(const char *bits, int total_bits, char *out);
+float bits_to_float(const char *bits);
+double bits_to_double(const char *bits);
+void bits_to_mpfr128(char *bits, mpfr_t rop);
+void mpfr_to_bits(mpfr_t x, char *bits);
+void generate_random_string(double a, double b, int P, char *buffer, size_t buf_size);
+
 
 /**
- * Функция для автоматического определения типа числа по размеру и вывода его значения
- * number - указатель на число
- * size - размер числа в байтах
- * prefix - строка, выводимая перед числом
+ * Преобразование числа в строку битов старший бит первый
+ * num это указатель на число
+ * size это размер числа в байтах
+ * out это строка, куда записываются биты 
  */
-void poisknumber_auto(void* number, size_t size, const char* prefix) {
-		if (size == sizeof(float)) {  // если размер совпадает с float
-				float f = *(float*)number;  // разыменовываем указатель как float
-				printf("%s float: %f\n", prefix, f);  // выводим значение
-		} else if (size == sizeof(double)) {  // если double
-				double d = *(double*)number;
-				printf("%s double: %lf\n", prefix, d);
-		} else if (size == sizeof(long double)) {  // если long double
-				long double ld = *(long double*)number;
-				printf("%s long double: %Lf\n", prefix, ld);
-		} else {
-				printf("%s неизвестный тип (size = %zu)\n", prefix, size); // если неизвестный размер
+void vesh_to_bits(void *num, size_t size, char *out) {
+	unsigned char *bytes = (unsigned char *)num;
+	size_t k = 0;
+	for (size_t i = size; i > 0; i--) {
+		for (int b = 7; b >= 0; b--) {
+			out[k++] = (bytes[i-1] >> b) & 1 ? '1' : '0';
 		}
+	}
+	out[size * 8] = '\0';
 }
 
 /**
- * Преобразование числа в строку битов (для визуализации)
- * num - указатель на число
- * size - размер числа в байтах
- * out - строка, куда записываются биты 
+ * Форматирование битовой строки в вид: знак | порядок | мантисса
+ * bits это строка битов (без пробелов)
+ * total_bits это общее число бит (32, 64 или 128)
+ * out это буфер для отформатированной строки
  */
-void bits_to_string(void* num, size_t size, char* out) {
-		unsigned char* bytes = (unsigned char*)num; // представляем число как массив байтов
-		size_t k = 0;  // индекс записи в строку
+void format_bits(const char *bits, int total_bits, char *out) {
+	if (total_bits == 32) {
+		sprintf(out, "%.*s  %.*s  %s", 1, bits, 8, bits+1, bits+9);
+	} else if (total_bits == 64) {
+		sprintf(out, "%.*s  %.*s  %s", 1, bits, 11, bits+1, bits+12);
+	} else if (total_bits == 128) {
+		sprintf(out, "%.*s  %.*s  %s", 1, bits, 15, bits+1, bits+16);
+	}
+}
 
-		for (size_t i = size; i > 0; i--) { // идём по байтам с конца, старший байт первый
-				for (int b = 7; b >= 0; b--) { // по битам внутри байта, старший бит первый
-						out[k++] = (bytes[i - 1] >> b) & 1 ? '1' : '0';
-				}
-		}
-		out[k] = '\0'; // завершаем строку
+
+
+/**
+ * Восстановление 32‑битного float из битовой строки.
+ */
+float bits_to_float(const char *bits) {
+	uint32_t u = 0;
+	for (int i = 0; i < 32; i++) {
+		u = (u << 1) | (bits[i] == '1');
+	}
+	float f;
+	memcpy(&f, &u, sizeof(f));
+	return f;
 }
 
 /**
- * Форматирование битовой строки в привычный вид: знак | порядок | мантисса
- * bits - строка с битами
- * total_bits - разрядность числа
- * out - строка результата
+ * Восстановление 64‑битного double из битовой строки.
  */
-void format_bits(const char* bits, int total_bits, char* out) {
-		if (total_bits == 32) 
-		{ // float 1|8|23
-				sprintf(out, "%.*s  %.*s  %s", 1, bits, 8, bits + 1, bits + 9);
-		} 
-		else if (total_bits == 64) 
-		{ // double 1|11|52
-				sprintf(out, "%.*s  %.*s  %s", 1, bits, 11, bits + 1, bits + 12);
-		} 
-		else if (total_bits == 128) 
-		{ // binary128 1|15|112
-				sprintf(out, "%.*s  %.*s  %s", 1, bits, 15, bits + 1, bits + 16);
-		} 
-		else {
-				strcpy(out, "Неподдерживаемый формат");
-		}
+double bits_to_double(const char *bits) {
+	uint64_t u = 0;
+	for (int i = 0; i < 64; i++) {
+		u = (u << 1) | (bits[i] == '1');
+	}
+	double d;
+	memcpy(&d, &u, sizeof(d));
+	return d;
 }
 
-/*
- * Генерация случайного числа в диапазоне [a, b] с округлением до P знаков
- * buffer - сюда записывается результат в виде строки
+/**
+ * Восстановление 128‑битного binary128 из битовой строки.
+ * Результат помещается в mpfr_t с точностью 113 бит.
+ */
+void bits_to_mpfr128(char *bits, mpfr_t rop) {
+	int sign = (bits[0] == '1') ? 1 : 0;
+
+	// Извлекаем порядок (15 бит)
+	int exp = 0;
+	for (int i = 0; i < 15; i++) {
+		exp = (exp << 1) | (bits[1+i] == '1');
+	}
+	if (exp == 0x7FFF) {
+	    mpfr_set_inf(rop, sign ? -1 : 1);
+	    return;
+	}
+	int biased_exp = exp;
+	int real_exp = biased_exp - 16383;
+	printf("real_exp = %d\n", real_exp);
+	// Мантисса (112 бит) как целое число
+	mpz_t mant;
+
+	// Функция mpz_init(число)
+	// Инициализирует переменную типа mpz_t (выделяет память для целого числа)
+	mpz_init(mant);
+
+	// Функция mpz_set_ui(число, значение)
+	// Присваивает беззнаковое целое значение переменной mpz_t
+	mpz_set_ui(mant, 0);
+
+	// Последовательно собираем целое значение мантиссы из 112 бит
+	for (int i = 0; i < 112; i++) {
+		// Функция mpz_mul_2exp(число, число, степень)
+		// Умножает число на 2^степень (сдвиг влево на 1 бит)
+		mpz_mul_2exp(mant, mant, 1);
+
+		// Функция mpz_add_ui(число, значение)
+		// Прибавляет беззнаковое целое значение к mpz_t числу
+		if (bits[16 + i] == '1')
+			mpz_add_ui(mant, mant, 1);
+	}
+
+	// Строим число с плавающей точкой:
+	// Функция mpfr_set_z(rop, op, rnd)
+	// Преобразует целое число mpz_t в число с плавающей точкой mpfr_t
+	mpfr_set_z(rop, mant, MPFR_RNDN);
+
+	// Функция mpfr_div_2ui(rop, op, n, rnd)
+	// Делит число на 2^n с указанным режимом округления
+	mpfr_div_2ui(rop, rop, 112, MPFR_RNDN);
+
+	// Функция mpfr_add_ui(rop, op, value, rnd)
+	// Прибавляет беззнаковое целое значение к числу mpfr_t
+	mpfr_add_ui(rop, rop, 1, MPFR_RNDN);
+
+	// Функция mpfr_mul_2exp(rop, op, n, rnd)
+	// Умножает число на 2^n с указанным режимом округления
+	mpfr_mul_2exp(rop, rop, real_exp, MPFR_RNDN);
+
+	// Функция mpfr_neg(rop, op, rnd)
+	// Меняет знак числа (умножает на -1) с указанным режимом округления
+	if (sign)
+		mpfr_neg(rop, rop, MPFR_RNDN);
+
+	// Функция mpz_clear(число)
+	// Освобождает память, занятую переменной mpz_t
+	mpz_clear(mant);
+}
+/**
+ * Получение битов binary128 из числа MPFR.
+ * Результат записывается в строку bits (должна быть длиной >= 128).
+ */
+void mpfr_to_bits(mpfr_t x, char *bits) {
+    if (mpfr_zero_p(x)) {
+        memset(bits, '0', 128);
+        bits[128] = '\0';
+        return;
+    }
+
+    int sign = mpfr_signbit(x);
+    bits[0] = sign ? '1' : '0';
+
+    mpfr_t t;
+    mpfr_init2(t, 113);
+    mpfr_abs(t, x, MPFR_RNDN);
+
+    mpfr_exp_t exp = mpfr_get_exp(t);
+
+    int biased_exp = (int)exp + 16383 - 1;
+
+    if (biased_exp >= 0x7FFF) biased_exp = 0x7FFE;
+    if (biased_exp <= 0) biased_exp = 1;
+
+    for (int i = 0; i < 15; i++) {
+        bits[1 + i] = (biased_exp >> (14 - i)) & 1 ? '1' : '0';
+    }
+
+    mpfr_div_2exp(t, t, exp - 1, MPFR_RNDN);
+    mpfr_sub_ui(t, t, 1, MPFR_RNDN);
+
+    for (int i = 0; i < 112; i++) {
+        mpfr_mul_2exp(t, t, 1, MPFR_RNDN);
+        if (mpfr_cmp_ui(t, 1) >= 0) {
+            bits[16 + i] = '1';
+            mpfr_sub_ui(t, t, 1, MPFR_RNDN);
+        } else {
+            bits[16 + i] = '0';
+        }
+    }
+
+    mpfr_clear(t);
+}
+
+
+/**
+ * Генерирует случайное число в диапазоне [a, b] и записывает его в строку
+ * с P знаками после десятичной точки (используя округление к ближайшему).
+ * buffer это буфер для результата
+ * buf_size это размер буфера
  */
 void generate_random_string(double a, double b, int P, char *buffer, size_t buf_size) {
-		double r = (double)rand() / RAND_MAX; // случайное число в [0,1]
-		r = a + (b - a) * r; // переносим в диапазон [a, b]
-		double scale = pow(10.0, P); // множитель для округления
-		r = round(r * scale) / scale; // округляем до P знаков
-		snprintf(buffer, buf_size, "%.*f", P, r); // сохраняем в строку
-}
-// Функция (число MPFR, строка bits)
-// Переводит число mpfr_t в строковое представление 128-битного (binary128)
-void mpfr_to_ieee128_bits(mpfr_t x, char *bits) {
-		if (mpfr_zero_p(x)) {                 // Функция mpfr_zero_p(x) проверяет, равно ли число нулю
-				memset(bits, '0', 128);           // Если ноль, все биты равны 0
-				bits[128] = '\0';                 // Завершаем C-строку
-				return;
-		}
-
-		int sign = mpfr_signbit(x);           // Функция mpfr_signbit(x) возвращает 1, если число отрицательное, 0 — если положительное
-		bits[0] = sign ? '1' : '0';           // Первый бит — знак
-
-		mpfr_exp_t exp;                        // Переменная для хранения порядка
-		mpz_t mantissa;                        // Целая часть мантиссы
-		mpz_init(mantissa);                   // Функция mpz_init(переменная)  
-
-		// Функция mpfr_get_z_2exp(мантисса, x)
-		// Извлекает мантиссу и порядок числа x в виде: x = мантисса * 2^exp
-		// Возвращает порядок, мантисса записывается в mantissa
-		exp = mpfr_get_z_2exp(mantissa, x);
-
-		// Функция mpz_sizeinbase(число, основание)
-		// Возвращает количество цифр числа в указанной системе счисления
-		// При основании 2 — это количество бит
-		size_t mant_bits = mpz_sizeinbase(mantissa, 2);
-
-		int biased_exp = exp - (int)mant_bits + 1 + 16383; // смещённый порядок
-
-		// Записываем 15 бит порядка
-		for (int i = 0; i < 15; i++) {
-				bits[1 + i] = (biased_exp >> (14 - i)) & 1 ? '1' : '0';
-		}
-
-		mpz_t mant_frac, mask;
-		mpz_init(mant_frac);                  // Функция mpz_init(переменная) — инициализация mpz_t
-		mpz_init(mask);                       // Функция mpz_init(переменная) — инициализация mpz_t
-
-		// Функция mpz_set_ui(переменная, значение)
-		// Присваивает беззнаковое целое значение
-		mpz_set_ui(mask, 1);
-
-		// Функция mpz_mul_2exp(результат, число, k)
-		// Вычисляет: результат = число · 2^k (сдвиг влево на k бит)
-		mpz_mul_2exp(mask, mask, 112);
-
-		// Функция mpz_sub_ui(результат, число, значение)
-		// Вычисляет: результат = число − значение
-		mpz_sub_ui(mask, mask, 1); // маска для 112 бит мантиссы
-
-		if (mant_bits > 113) {
-				// Функция mpz_tdiv_q_2exp(результат, число, k)
-				// Делит число на 2^k с усечением (сдвиг вправо)
-				mpz_tdiv_q_2exp(mant_frac, mantissa, mant_bits - 113); // усечение лишних бит
-		} else {
-				// Функция mpz_mul_2exp(результат, число, k)
-				// Сдвиг влево (умножение на 2^k)
-				mpz_mul_2exp(mant_frac, mantissa, 112 - (mant_bits - 1)); // выравнивание в младшие 112 бит
-		}
-
-		// Функция mpz_and(результат, число1, число2)
-		// Побитовое И: результат = число1 AND число2
-		mpz_and(mant_frac, mant_frac, mask); // применяем маску
-
-		char *mant_str = mpz_get_str(NULL, 2, mant_frac); // преобразуем мантиссу в строку битов
-		int mant_len = strlen(mant_str);
-		int pos = 16; // после знака и порядка
-		for (int i = 0; i < 112 - mant_len; i++) bits[pos++] = '0'; // дополняем ведущими нулями
-		for (int i = 0; i < mant_len; i++) bits[pos++] = mant_str[i]; // копируем мантиссу
-		bits[128] = '\0';
-
-		mpz_clear(mantissa);   // очищаем память
-		mpz_clear(mant_frac);
-		mpz_clear(mask);
-		free(mant_str);
+	mpfr_t r;
+	mpfr_init2(r, 512);               // высокая точность для генерации
+	gmp_randstate_t state;
+	gmp_randinit_default(state);
+	gmp_randseed_ui(state, (unsigned long)time(NULL) + rand());
+	mpfr_urandom(r, state, MPFR_RNDN);
+	mpfr_mul_d(r, r, b - a, MPFR_RNDN);
+	mpfr_add_d(r, r, a, MPFR_RNDN);
+	mpfr_sprintf(buffer, "%.*Rf", P, r);
+	mpfr_clear(r);
+	gmp_randclear(state);
 }
 
 int main(void) {
-		// Открытие файла input.txt для чтения параметров
-		FILE *input = fopen("input.txt", "r");
-		if (!input) { // проверка успешного открытия
-				printf("Ошибка открытия input.txt\n");
-				return 1;
+	FILE *input = fopen("input.txt", "r");
+	if (!input) {
+		printf("Ошибка открытия input.txt\n");
+		return 1;
+	}
+
+	int N, K, bits, P;
+	double a, b;
+	if (fscanf(input, "%d%d%d%lf%lf%d", &N, &K, &bits, &a, &b, &P) != 6) {
+		printf("Ошибка чтения параметров\n");
+		fclose(input);
+		return 1;
+	}
+	fclose(input);
+
+	srand((unsigned int)time(NULL));
+
+	// Создаём папки для результатов
+	system("mkdir -p zadanie");
+	system("mkdir -p proverka");
+
+	// Инициализируем MPFR с высокой точностью для эталонных вычислений
+	mpfr_set_default_prec(512);
+	mpfr_set_default_rounding_mode(MPFR_RNDN);
+
+	// Генератор GMP для случайных чисел (используется в generate_random_string)
+	gmp_randstate_t gmp_state;
+	gmp_randinit_default(gmp_state);
+	gmp_randseed_ui(gmp_state, (unsigned long)time(NULL));
+
+	for (int v = 1; v <= N; v++) {
+		char file_zadanie[100], file_proverka[100];
+		sprintf(file_zadanie, "zadanie/variant_%d.md", v);
+		sprintf(file_proverka, "proverka/variant_%d.md", v);
+
+		FILE *fz = fopen(file_zadanie, "w");
+		FILE *fp = fopen(file_proverka, "w");
+		if (!fz || !fp) {
+			if (fz) fclose(fz);
+			if (fp) fclose(fp);
+			continue;
 		}
 
-		int N, K, bits, P;
-		double a, b;
+		// Заголовки таблиц
+		fprintf(fz, "| N | Вещественное число |\n|---|-------------------|\n");
+		fprintf(fp, "| N | Вещественное число | Машинное представление | Восстановленное число | Ошибка |\n|---|-------------------|------------------------|-----------------------|--------|\n");
 
-		// Считываем 6 параметров из файла
-		if (fscanf(input, "%d%d%d%lf%lf%d", &N, &K, &bits, &a, &b, &P) != 6) {
-				printf("Ошибка чтения параметров\n");
-				fclose(input);
-				return 1;
+		for (int i = 1; i <= K; i++) {
+			char original_str[100];
+			// Генерируем строку с P знаками 
+			generate_random_string(a, b, P, original_str, sizeof(original_str));
+
+			// число с высокой точностью (MPFR, 256 бит)
+			// mpfr_t — тип числа произвольной точности
+			mpfr_t exact;
+
+			// Функция mpfr_init2(переменная, precision)
+			// Инициализирует mpfr_t с заданной точностью в битах
+			mpfr_init2(exact, 512);
+
+			// Функция mpfr_set_str(rop, str, base, rnd)
+			// Преобразует строку в число mpfr_t
+			// base — основание системы счисления (10), rnd — режим округления
+			mpfr_set_str(exact, original_str, 10, MPFR_RNDN);
+
+			if (bits == 32) {
+
+				// Функция mpfr_get_d(op, rnd)
+				// Преобразует mpfr_t число в double с округлением
+				float machine_f = (float)mpfr_get_d(exact, MPFR_RNDN);
+
+				// Битовое представление float
+				char bits_str[33];
+
+				// Функция vesh_to_bits(num, size, out)
+				// Преобразует бинарное представление числа в строку битов
+				vesh_to_bits(&machine_f, sizeof(float), bits_str);
+
+				// Форматирование битовой строки (знак | порядок | мантисса)
+				char formatted[64];
+
+				// Функция format_bits(bits, total_bits, out)
+				// Разбивает битовую строку на поля IEEE 754
+				format_bits(bits_str, 32, formatted);
+
+				// Восстановление float из битов
+				// Функция bits_to_float(bits)
+				float recovered_f = bits_to_float(bits_str);
+
+				// Ошибка = |exact - recovered_f|
+				mpfr_t err;
+
+				// Инициализация mpfr_t числа ошибки
+				mpfr_init2(err, 512);
+
+				// Функция mpfr_set_d(rop, op, rnd)
+				// Преобразует double в mpfr_t
+				mpfr_set_d(err, recovered_f, MPFR_RNDN);
+
+				// Функция mpfr_sub(rop, op1, op2, rnd)
+				// Вычисляет rop = op1 − op2
+				mpfr_sub(err, exact, err, MPFR_RNDN);
+
+				// Функция mpfr_abs(rop, op, rnd)
+				// Вычисляет модуль числа
+				mpfr_abs(err, err, MPFR_RNDN);
+
+				char err_str[512];
+
+				// Функция mpfr_sprintf(buffer, format, op)
+				// Форматированный вывод mpfr_t в строку
+				mpfr_sprintf(err_str, "%.12Re", err);
+
+				// Запись результатов
+				fprintf(fz, "| %d | %s |\n", i, original_str);
+				fprintf(fp, "| %d | %s | `%s` | %.10g | %s |\n",
+						i, original_str, formatted, recovered_f, err_str);
+
+				// Функция mpfr_clear(число)
+				// Освобождает память mpfr_t
+				mpfr_clear(err);
+				mpfr_clear(exact);
+			}
+			else if (bits == 64) {
+
+				// Преобразование mpfr double
+				double machine_d = mpfr_get_d(exact, MPFR_RNDN);
+
+				char bits_str[65];
+
+				vesh_to_bits(&machine_d, sizeof(double), bits_str);
+
+				char formatted[128];
+				format_bits(bits_str, 64, formatted);
+
+				// Восстановление double из битов
+				double recovered_d = bits_to_double(bits_str);
+
+				mpfr_t err;
+				mpfr_init2(err, 512);
+
+				mpfr_set_d(err, recovered_d, MPFR_RNDN);
+				mpfr_sub(err, exact, err, MPFR_RNDN);
+				mpfr_abs(err, err, MPFR_RNDN);
+
+				char err_str[512];
+				mpfr_sprintf(err_str, "%.12Re", err);
+
+				fprintf(fz, "| %d | %s |\n", i, original_str);
+				fprintf(fp, "| %d | %s | `%s` | %.15g | %s |\n",
+						i, original_str, formatted, recovered_d, err_str);
+
+				mpfr_clear(err);
+				mpfr_clear(exact);
+			}
+			else if (bits == 128) {
+
+				// mpfr_t число с точностью binary128 (113 бит)
+				mpfr_t rounded;
+
+				// Инициализация с точностью 113 бит
+				mpfr_init2(rounded, 113);
+
+				// Округление эталонного числа до 113 бит
+				mpfr_set(rounded, exact, MPFR_RNDN);
+
+				char bits_str[129];
+
+				// Преобразование mpfr битовая строка IEEE 754 binary128
+				mpfr_to_bits(rounded, bits_str);
+
+				char formatted[256];
+				format_bits(bits_str, 128, formatted);
+
+				mpfr_t recovered;
+
+				// Инициализация восстановленного числа
+				mpfr_init2(recovered, 113);
+
+				// Восстановление числа из битовой строки
+				bits_to_mpfr128(bits_str, recovered);
+
+				mpfr_t err;
+				mpfr_init2(err, 512);
+
+				mpfr_sub(err, exact, recovered, MPFR_RNDN);
+				mpfr_abs(err, err, MPFR_RNDN);
+
+				char err_str[512];
+				mpfr_sprintf(err_str, "%.12Re", err);
+
+				char rec_str[100];
+				mpfr_sprintf(rec_str, "%.*Rf", P, recovered);
+
+				fprintf(fz, "| %d | %s |\n", i, original_str);
+				fprintf(fp, "| %d | %s | `%s` | %s | %s |\n",
+						i, original_str, formatted, rec_str, err_str);
+
+				mpfr_clear(rounded);
+				mpfr_clear(recovered);
+				mpfr_clear(err);
+				mpfr_clear(exact);
+			}
+			else {
+				fprintf(stderr, "Неподдерживаемый размер битов: %d\n", bits);
+				break;
+			}
 		}
-		fclose(input); // файл больше не нужен
 
-		srand((unsigned int)time(NULL)); // инициализация генератора rand()
-		system("mkdir -p zadanie"); // создаём папку для заданий
-		system("mkdir -p proverka"); // создаём папку для проверки
+		fclose(fz);
+		fclose(fp);
+	}
 
-		mpfr_set_default_prec(113); // MPFR: точность для binary128 (113 бит)
-		mpfr_set_default_rounding_mode(MPFR_RNDN); // MPFR: округление к ближайшему
-
-		gmp_randstate_t state;
-		gmp_randinit_default(state); // GMP инициализация генератора
-		gmp_randseed_ui(state, time(NULL)); // GMP засеваем генератор временем
-
-		// Цикл по вариантам
-		for (int v = 1; v <= N; v++) {
-				char file1[100], file2[100];
-				sprintf(file1, "zadanie/variant_%d.md", v); 
-				sprintf(file2, "proverka/variant_%d.md", v); 
-
-				FILE *f1 = fopen(file1, "w");
-				FILE *f2 = fopen(file2, "w");
-				if (!f1 || !f2) continue; // если файлы не открылось, переходим к следующему варианту
-
-				// Заголовки таблиц
-				fprintf(f1, "| N | Вещ число |\n|---|------------|\n");
-				fprintf(f2, "| N | Вещ число | Машинное представление | Ошибка |\n|---|------------|------------------------|----------|\n");
-
-				// Генерация чисел
-				for (int i = 1; i <= K; i++) {
-						char original_str[100];
-
-						// Генерация числа для обычной разрядности
-						if (bits != 128) {
-								generate_random_string(a, b, P, original_str, sizeof(original_str));
-						} else { // для binary128
-								mpfr_t r;
-								mpfr_init2(r, 113); // Функция mpfr_init2(переменная, точность) выделяет память и задаёт точность числа)
-								// r = случайное число в [0,1]
-								mpfr_urandom(r, state, MPFR_RNDN); // Функция mpfr_urandom(результат, генератор, режим округления)
-								// масштабируем на диапазон
-								mpfr_mul_d(r, r, b - a, MPFR_RNDN);  // mpfr_mul_d(результат, число, множитель, режим округления)
-								mpfr_add_d(r, r, a, MPFR_RNDN);     // mpfr_add_d(результат, число, слагаемое, режим округления)
-								// переводим в строку
-								mpfr_sprintf(original_str, "%.*Rf", P, r); // mpfr_sprintf(буфер, формат, число)
-								mpfr_clear(r); // очищаем память
-						}
-
-						// 32
-						if (bits == 32) {
-								float temp = (float)atof(original_str); // перевод строки в float
-								char bits_str[200];
-								bits_to_string(&temp, sizeof(float), bits_str); // получаем биты
-								char formatted[300];
-								format_bits(bits_str, 32, formatted); // форматируем биты
-								double error = fabs(atof(original_str) - temp); // абсолютная ошибка
-								fprintf(f1, "| %d | %s |\n", i, original_str);
-								fprintf(f2, "| %d | %s | `%s` | %.12e |\n", i, original_str, formatted, error);
-								poisknumber_auto(&temp, sizeof(temp), "32-bit"); // выводим тип и значение
-						}
-						// 64
-						else if (bits == 64) {
-								// Создаём переменную MPFR для "точного" числа с высокой точностью (256 бит)
-								mpfr_t high_prec_mpfr;
-								mpfr_init2(high_prec_mpfr, 256); // void mpfr_init2(mpfr_t rop, mpfr_prec_t prec) { инициализация MPFR с prec бит }
-
-								// Генерация случайного числа в [a, b]
-								mpfr_t r;
-								mpfr_init2(r, 256); // инициализация переменной r для генерации
-								mpfr_urandomb(r, state);           // void mpfr_urandomb(mpfr_t rop, gmp_randstate_t state) { rop = [0,1) }
-								mpfr_mul_d(r, r, b - a, MPFR_RNDN); // int mpfr_mul_d(mpfr_t rop, const mpfr_t op1, double op2, mpfr_rnd_t rnd) { rop = op1 * op2 }
-								mpfr_add_d(r, r, a, MPFR_RNDN);     // int mpfr_add_d(mpfr_t rop, const mpfr_t op1, double op2, mpfr_rnd_t rnd) { rop = op1 + op2 }
-
-								mpfr_set(high_prec_mpfr, r, MPFR_RNDN); // int mpfr_set(mpfr_t rop, const mpfr_t op, mpfr_rnd_t rnd) { rop = op }
-								mpfr_clear(r);                           // void mpfr_clear(mpfr_t rop) { освобождает память }
-
-								// Конвертируем "точное" число в строку для записи в файл
-								char original_str[100];
-								mpfr_sprintf(original_str, "%.*Re", P, high_prec_mpfr); // int mpfr_sprintf(char *str, const char *format, ...) { запись числа MPFR в строку }
-
-								// Переводим в double для машинного представления
-								double temp = mpfr_get_d(high_prec_mpfr, MPFR_RNDN); // double mpfr_get_d(const mpfr_t op, mpfr_rnd_t rnd) { возвращает double }
-
-								// Получаем битовое представление double
-								char bits_str[200];
-								bits_to_string(&temp, sizeof(double), bits_str); // пользовательская функция
-								char formatted[300];
-								format_bits(bits_str, 64, formatted);           // пользовательская функция
-
-								// Вычисляем абсолютную ошибку: high_prec_mpfr - temp
-								mpfr_t error_mpfr;
-								mpfr_init2(error_mpfr, 256);                  // инициализация переменной для ошибки
-								mpfr_set_d(error_mpfr, temp, MPFR_RNDN);     // int mpfr_set_d(mpfr_t rop, double op, mpfr_rnd_t rnd) { rop = op }
-								mpfr_sub(error_mpfr, high_prec_mpfr, error_mpfr, MPFR_RNDN); // int mpfr_sub(mpfr_t rop, const mpfr_t op1, const mpfr_t op2, mpfr_rnd_t rnd) { rop = op1 - op2 }
-
-								char error_str[100];
-								mpfr_sprintf(error_str, "%.12Re", error_mpfr); // запись ошибки в строку
-
-								fprintf(f1, "| %d | %s |\n", i, original_str);                         // исходное число
-								fprintf(f2, "| %d | %s | `%s` | %s |\n", i, original_str, formatted, error_str); // с машинным представлением и ошибкой
-
-								mpfr_clear(high_prec_mpfr);
-								mpfr_clear(error_mpfr);
-
-								// Вывод типа и значения
-								poisknumber_auto(&temp, sizeof(temp), "64-bit");
-						}
-						//так на самом деле можно было сделать и 64 без mpfr но мне удобнее с ним без него я не мог ошибку поймать 
-						// 128
-						else if (bits == 128) {
-								mpfr_t original_mpfr, rounded_mpfr, diff;
-								mpfr_init2(original_mpfr, 256); /* Функция mpfr_init2(переменная, точность) —  
-								создаёт число MPFR с высокой точностью для "точного" значения */ 
-								mpfr_init2(rounded_mpfr, 113);  /* Функция mpfr_init2(переменная, точность) — 
-								создаёт число MPFR с точностью binary128 (113 бит) */
-								mpfr_init2(diff, 256); /* Функция mpfr_init2(переменная, точность) — 
-								создаёт число MPFR для хранения разницы с высокой точностью */
-
-
-								mpfr_set_str(original_mpfr, original_str, 10, MPFR_RNDN); /* Функция mpfr_set_str(результат, строка, основание, режим округления) — 
-								перевод строки в число MPFR */
-								mpfr_set(rounded_mpfr, original_mpfr, MPFR_RNDN); /* Функция mpfr_set(результат, источник, режим округления) — 
-								округляет число до precision=113 бит */
-
-								char bits_str[129];
-								mpfr_to_ieee128_bits(rounded_mpfr, bits_str); /* Функция mpfr_to_ieee128_bits(число, строка) — 
-								получает битовое представление числа в виде строки */ 
-								char formatted[300];
-								format_bits(bits_str, 128, formatted); /* Функция format_bits(строка битов, разрядность, выход) — 
-								форматирует строку: знак | порядок | мантисса
-*/
-
-								mpfr_sub(diff, original_mpfr, rounded_mpfr, MPFR_RNDN); /*Функция mpfr_sub(результат, число1, число2, режим округления) — 
-								вычисляет разницу точного и округлённого числа*/
-								char err_str[64];
-								mpfr_sprintf(err_str, "%.12Re", diff); /*// Функция mpfr_sprintf(буфер, формат, число) — 
-								переводит MPFR число в строку с экспоненциальным форматом
-*/
-
-								fprintf(f1, "| %d | %s |\n", i, original_str);
-								fprintf(f2, "| %d | %s | `%s` | %s |\n", i, original_str, formatted, err_str);
-
-								mpfr_clear(original_mpfr);
-								mpfr_clear(rounded_mpfr);
-								mpfr_clear(diff);
-						}
-				}
-
-				fclose(f1);
-				fclose(f2);
-		}
-
-		gmp_randclear(state); 
-		printf("Готово. Результаты в папках zadanie/ и proverka/\n");
-
-		return 0;
+	gmp_randclear(gmp_state);
+	printf("Готово. Результаты в папках zadanie/ и proverka/\n");
+	return 0;
 }
